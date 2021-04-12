@@ -50,6 +50,7 @@ pub struct GlobalState {
 
 impl GlobalState {
     pub fn new(balance_levels: usize, order_levels: usize, account_levels: usize, n_tx: usize, verbose: bool) -> Self {
+        Tree::print_config();
         let default_balance_root = empty_tree_root(balance_levels, Fr::zero());
         let default_order_leaf = Order::default().hash();
         let dummy_order_tree = Tree::new(order_levels, default_order_leaf);
