@@ -82,18 +82,31 @@ impl Default for PlaceOrder {
 type PlaceAccountType = HashMap<u32, u32>;
 //index type?
 #[derive(Debug)]
-struct PlaceAccount(PlaceAccountType);
+struct PlaceAccount {
+    accountmapping: PlaceAccountType,
+    balance_bench: f32,
+}
 
 impl Deref for PlaceAccount {
     type Target = PlaceAccountType;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.accountmapping
     }
 }
 
 impl DerefMut for PlaceAccount {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.accountmapping
+    }
+}
+
+
+impl Default for PlaceAccount {
+    fn default() -> Self {
+        PlaceAccount {
+            accountmapping: PlaceAccountType::new(),
+            balance_bench : 0.0,
+        }
     }
 }
 
@@ -174,13 +187,22 @@ impl PlaceAccount {
             types::number_to_integer(&balance_before, test_const::prec(token_id))
         );
     
+        let timing = Instant::now();
+
         state.deposit_to_old(common::DepositToOldTx {
             token_id,
             account_id: deposit.user_id,
             amount: types::number_to_integer(&deposit.change, test_const::prec(token_id)),
         });
+
+        self.balance_bench += timing.elapsed().as_secs_f32();
     }
     
+    fn take_bench(&mut self) -> (f32, f32) {
+        let ret = (self.balance_bench, 0.0);
+        self.balance_bench = 0.0;
+        ret
+    }
 
 }
 
@@ -433,13 +455,14 @@ impl PlaceOrder {
         let mut put_states = vec![&ask_order_state_before, &bid_order_state_before];
         put_states.sort();
 
-        let mut timing = Instant::now();
         for order_state in put_states.into_iter() {
             if !self.contains_key(&order_state.order_id) {
                 //why the returning order id is u32?
                 // in fact the GlobalState should not expose "inner idx/pos" to caller
                 // we'd better handle this inside GlobalState later
+                let timing = Instant::now();
                 let new_order_pos = state.place_order(order_state.place_order_tx());
+                self.place_bench += timing.elapsed().as_secs_f32();
                 self.insert(order_state.order_id, (order_state.account_id, new_order_pos as u64));
                 if test_const::VERBOSE {
                     println!(
@@ -451,9 +474,6 @@ impl PlaceOrder {
                 println!("skip put order {}", order_state.order_id);
             }
         }
-        self.place_bench += timing.elapsed().as_secs_f32();
-
-        timing = Instant::now();
 
         assert_balance_state(
             &trade.state_before.balance,
@@ -464,6 +484,7 @@ impl PlaceOrder {
         );
         self.assert_order_state(state, ask_order_state_before, bid_order_state_before);
 
+        let timing = Instant::now();
         state.spot_trade(self.trade_into_spot_tx(&trade));
         self.spot_bench += timing.elapsed().as_secs_f32();
 
@@ -498,6 +519,7 @@ fn bench_global_state(circuit_repo: &Path) -> Result<Vec<common::L2Block>>{
 
     println!("prepare bench: {} records", messages.len());
     
+    global_state::GlobalState::print_config();
     //use custom states
     let mut state = global_state::GlobalState::new(
         10,//test_const::BALANCELEVELS,
@@ -509,10 +531,9 @@ fn bench_global_state(circuit_repo: &Path) -> Result<Vec<common::L2Block>>{
 
     //amplify the records: in each iter we run records on a group of new accounts
     let mut timing = Instant::now();
+    let mut place_order = PlaceOrder::default();
+    let mut place_account = PlaceAccount::default();    
     for i in 1..51 {
-        let mut place_order = PlaceOrder::default();
-        let mut place_account = PlaceAccount(PlaceAccountType::new());
-        
 
         for msg in messages.iter() {
             match msg {
@@ -526,11 +547,16 @@ fn bench_global_state(circuit_repo: &Path) -> Result<Vec<common::L2Block>>{
                 _ => unreachable!(),
             }
         }
+
+        place_order.clear();
+        place_account.clear();
+
         if i % 10 == 0 {
             let total = timing.elapsed().as_secs_f32();
+            let (balance_t, _) = place_account.take_bench();
             let (plact_t, spot_t) = place_order.take_bench();
-            println!("{}th 10 iters in {}s: place {}%, spot {}%", i / 10, total, 
-                plact_t * 100.0 / total, spot_t * 100.0 / total);
+            println!("{}th 10 iters in {:.5}s: balance {:.3}%, place {:.3}%, spot {:.3}%", i / 10, total, 
+                balance_t * 100.0 / total, plact_t * 100.0 / total, spot_t * 100.0 / total);
             timing = Instant::now();
         }
         
@@ -556,7 +582,7 @@ fn replay_msgs(circuit_repo: &Path) -> Result<(Vec<common::L2Block>, types::Circ
     println!("genesis root {}", state.root());
 
     let mut place_order = PlaceOrder::default();
-    let mut place_account = PlaceAccount(PlaceAccountType::new());
+    let mut place_account = PlaceAccount::default();
 /*
     for _ in 0..test_const::MAXACCOUNTNUM {
         state.create_new_account(1);
