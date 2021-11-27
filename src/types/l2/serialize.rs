@@ -275,3 +275,23 @@ impl From<l2::L2BlockDetail> for L2BlockSerde {
         }
     }
 }
+
+
+#[derive(Serialize)]
+pub struct PubDataAux {
+    #[serde(rename = "deposit")]
+    pub deposit_txs_pos: Vec<u32>
+}
+
+
+impl<'d> From<&'d l2::L2Block> for PubDataAux {
+    fn from(origin: &'d l2::L2Block) -> Self {
+
+        let deposit : Vec<u32> = 
+            origin.detail.txs_type.
+
+        PubDataAux {
+            deposit_txs_pos: Vec::default(),
+        }
+    }
+}
